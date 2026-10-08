@@ -11,13 +11,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.IntState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -82,23 +83,34 @@ fun CounterCell(counter: Counter) {
 
 @Composable
 private fun ActiveSecondsText(startTime: Long?) {
-    var activeSeconds by remember(startTime) {
-        val elapsedTimeMillis = startTime?.let { System.currentTimeMillis() - it } ?: 0L
-        mutableIntStateOf((elapsedTimeMillis / 1000).toInt())
-    }
-    if (startTime != null) {
-        LaunchedEffect(startTime) {
-            while (true) {
-                val elapsedTimeMillis = System.currentTimeMillis() - startTime
-                activeSeconds = (elapsedTimeMillis / 1000).toInt()
-                delay(1000 - (elapsedTimeMillis % 1000))
-            }
-        }
-    }
+    val activeSeconds by rememberElapsedSeconds(startTime)
     Text(
         text = "$activeSeconds",
         style = MaterialTheme.typography.headlineLarge
     )
+}
+
+internal fun elapsedSeconds(now: Long, startTime: Long): Int = ((now - startTime) / 1000).toInt()
+internal fun delayUntilNextTick(now: Long, startTime: Long): Long = 1000 - (now - startTime) % 1000
+
+@Composable
+fun rememberElapsedSeconds(
+    startTime: Long?,
+    clock: () -> Long = System::currentTimeMillis,
+): IntState {
+    val seconds = remember(startTime) {
+        mutableIntStateOf(startTime?.let { elapsedSeconds(clock(), it) } ?: 0)
+    }
+    if (startTime != null) {
+        LaunchedEffect(startTime) {
+            while (true) {
+                val now = clock()
+                seconds.intValue = elapsedSeconds(now, startTime)
+                delay(delayUntilNextTick(now, startTime))
+            }
+        }
+    }
+    return seconds
 }
 
 @Composable
@@ -111,7 +123,7 @@ fun CounterCellPreview() {
 }
 
 @Composable
-@Preview(showBackground = true, showSystemUi = true)
+@Preview(showBackground = true, showSystemUi = true, device = Devices.PIXEL_6)
 fun MainScreenPreview() {
     CountersTheme {
         val counters = persistentListOf<Counter>().mutate { list ->
