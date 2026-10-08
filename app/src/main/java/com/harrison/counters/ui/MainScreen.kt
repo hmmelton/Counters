@@ -2,9 +2,12 @@ package com.harrison.counters.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -46,6 +49,7 @@ fun MainScreen(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         state = listState,
+        contentPadding = WindowInsets.systemBars.asPaddingValues()
     ) {
         items(
             items = counters,
@@ -77,36 +81,34 @@ fun CounterCell(counter: Counter) {
             text = "ID: ${counter.id}",
             style = MaterialTheme.typography.headlineLarge
         )
-        ActiveSecondsText(counter.startTime)
+        ActiveSecondsText(counter)
     }
 }
 
 @Composable
-private fun ActiveSecondsText(startTime: Long?) {
-    val activeSeconds by rememberElapsedSeconds(startTime)
+private fun ActiveSecondsText(counter: Counter) {
+    val activeSeconds by rememberElapsedSeconds(counter)
     Text(
         text = "$activeSeconds",
         style = MaterialTheme.typography.headlineLarge
     )
 }
 
-internal fun elapsedSeconds(now: Long, startTime: Long): Int = ((now - startTime) / 1000).toInt()
-internal fun delayUntilNextTick(now: Long, startTime: Long): Long = 1000 - (now - startTime) % 1000
-
 @Composable
 fun rememberElapsedSeconds(
-    startTime: Long?,
+    counter: Counter,
     clock: () -> Long = System::currentTimeMillis,
 ): IntState {
+    val startTime = counter.startTime
     val seconds = remember(startTime) {
-        mutableIntStateOf(startTime?.let { elapsedSeconds(clock(), it) } ?: 0)
+        mutableIntStateOf(counter.elapsedSecondsAt(clock()))
     }
     if (startTime != null) {
         LaunchedEffect(startTime) {
             while (true) {
                 val now = clock()
-                seconds.intValue = elapsedSeconds(now, startTime)
-                delay(delayUntilNextTick(now, startTime))
+                seconds.intValue = counter.elapsedSecondsAt(now)
+                delay(counter.millisUntilNextTickAt(now) ?: return@LaunchedEffect)
             }
         }
     }

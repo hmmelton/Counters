@@ -22,22 +22,27 @@ LazyColumn ──visible items (snapshotFlow)──▶ MainViewModel.onItemsFirs
     │                                              ▼
  CounterCell ◀── StateFlow<List<Counter>> ◀── PersistentList<Counter>
     │
- ActiveSecondsText: derives seconds from startTime, ticks on its own boundaries
+ ActiveSecondsText ◀── rememberElapsedSeconds(counter): IntState
+                         ticks on the counter's own second boundaries
 ```
 
 ### Store when a counter started, not its count
 
 ```kotlin
-data class Counter(val id: Int, val startTime: Long? = null)
+data class Counter(val id: Int, val startTime: Long? = null) {
+    fun elapsedSecondsAt(now: Long): Int =
+        startTime?.let { ((now - it) / 1000).toInt() } ?: 0
+
+    fun millisUntilNextTickAt(now: Long): Long? =
+        startTime?.let { 1000 - (now - it) % 1000 }
+}
 ```
 
-`LazyColumn` discards a row's composition, including anything `remember`ed, when the row scrolls out of view. A running count stored in the row would be lost. Instead, the ViewModel stores a start timestamp per item, and the displayed value is always derived from it:
-
-```
-seconds = (now - startTime) / 1000
-```
+`LazyColumn` discards a row's composition, including anything `remember`ed, when the row scrolls out of view. A running count stored in the row would be lost. Instead, the ViewModel stores a start timestamp per item, and the displayed value is always derived from it.
 
 An off-screen counter is a single `Long`. When its row comes back, the value is correct on the first frame.
+
+The timing rules live on the model as pure functions of `now`, so they have no dependency on Compose or the system clock and can be unit-tested directly. `millisUntilNextTickAt` returns `null` until the counter has started, because a counter that isn't running has no next tick. Member functions don't affect a data class's `equals`, `hashCode`, `copy`, or how the Compose compiler judges its stability.
 
 ### Detect visibility once per change, in batches
 
@@ -48,12 +53,25 @@ The screen observes `LazyListState.layoutInfo.visibleItemsInfo` with `snapshotFl
 ### Tick on each counter's own second boundary
 
 ```kotlin
-LaunchedEffect(startTime) {
-    while (true) {
-        val elapsed = System.currentTimeMillis() - startTime
-        activeSeconds = (elapsed / 1000).toInt()
-        delay(1000 - elapsed % 1000)
+@Composable
+fun rememberElapsedSeconds(
+    counter: Counter,
+    clock: () -> Long = System::currentTimeMillis,
+): IntState {
+    val startTime = counter.startTime
+    val seconds = remember(startTime) {
+        mutableIntStateOf(counter.elapsedSecondsAt(clock()))
     }
+    if (startTime != null) {
+        LaunchedEffect(startTime) {
+            while (true) {
+                val now = clock()
+                seconds.intValue = counter.elapsedSecondsAt(now)
+                delay(counter.millisUntilNextTickAt(now) ?: return@LaunchedEffect)
+            }
+        }
+    }
+    return seconds
 }
 ```
 
@@ -61,6 +79,10 @@ LaunchedEffect(startTime) {
 - **Sleep only until the next boundary.** A row that returns 4,370ms after it started waits 630ms, not 1,000ms, so it stays in phase with its original start, and with any counters that started alongside it.
 - **Seed the initial value synchronously.** `remember(startTime) { … }` computes the current count during composition, so a returning row never shows `0` for a frame before the effect runs.
 - **Key on `startTime`.** The effect and the seeded state belong to a specific start time, so they reset correctly if it changes.
+- **Return `IntState`, not `State<Int>`.** `IntState` has its own `by` delegate that reads `intValue` directly, so neither writes nor reads box the `Int`.
+- **Keep the coroutine tied to composition.** The tick loop is a `LaunchedEffect`, so it is cancelled automatically when the row leaves the screen. Only the timing rules are extracted; the lifecycle stays with the UI that needs it.
+- **Read the state as low as possible.** `ActiveSecondsText` reads `rememberElapsedSeconds(counter)` and contains only a `Text`, so each tick recomposes that `Text` and nothing else in the row.
+- **The clock is injectable.** The `clock` parameter lets tests drive time with a virtual clock instead of waiting in real time.
 
 ### Update one item without copying the list
 
@@ -86,10 +108,10 @@ The result: when a counter starts, only the row that changed recomposes. Every o
 app/src/main/java/com/harrison/counters/
 ├── MainActivity.kt          # Hosts the Compose UI and obtains the ViewModel
 ├── data/
-│   └── Counter.kt           # Immutable model: id + optional start time
+│   └── Counter.kt           # Immutable model (id + optional start time) and its timing rules
 └── ui/
     ├── MainViewModel.kt     # Owns StateFlow<List<Counter>>, starts counters
-    ├── MainScreen.kt        # LazyColumn, visibility tracking, CounterCell, ActiveSecondsText
+    ├── MainScreen.kt        # LazyColumn, visibility tracking, CounterCell, rememberElapsedSeconds
     └── theme/               # Material 3 theme
 ```
 
