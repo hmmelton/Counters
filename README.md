@@ -1,6 +1,6 @@
 # Counters
 
-A small Jetpack Compose app that shows a scrolling list of counters. Each counter starts at `0` and begins counting up once per second the first time its row appears on screen.
+A small Jetpack Compose app that shows a scrolling list of counters, created for [a Medium article](https://medium.com/@hmmelton95/creating-a-scrollable-list-of-counters-in-jetpack-compose-8e5f69ffd105). Each counter starts at `0` and begins counting up once per second the first time its row appears on screen.
 
 The requirements are simple, but they touch most of the subtle parts of Compose performance: state that has to survive `LazyColumn` disposing rows, timers that must stay accurate, visibility detection, and keeping recomposition to the rows that actually changed.
 
